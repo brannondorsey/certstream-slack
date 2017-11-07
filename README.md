@@ -1,5 +1,6 @@
 # certstream-slack
 [![Build Status](https://travis-ci.org/heptiolabs/certstream-slack.svg?branch=master)](https://travis-ci.org/heptiolabs/certstream-slack)
+[![Go Report Card](https://goreportcard.com/badge/github.com/heptiolabs/certstream-slack)](https://goreportcard.com/report/github.com/heptiolabs/certstream-slack)
 
 `certstream-slack` is a small daemon that watches your domains in [Certificate Transparency](https://www.certificate-transparency.org/what-is-ct) logs and posts them into [Slack](https://slack.com/). It uses the [API provided by Cali Dog Security](https://certstream.calidog.io/) rather than parsing the CT logs directly. Thanks to Cali Dog Security for this service!
 
