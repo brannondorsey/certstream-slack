@@ -13,7 +13,8 @@
 ## Environment Variables
 
 - **`SLACK_WEBHOOK_URL`**: a Slack [incoming webhook](https://api.slack.com/custom-integrations/incoming-webhooks) URL.
-  This URL also controls the channel and name of the bot.
+  The Slack configuration controls the name of the bot and the channel into which it will post.
+  Leave this unset to skip posting to Slack (log only, useful for debugging).
 
 - **`DOMAIN_PATTERN`**: A [Go regular expression](https://golang.org/pkg/regexp/syntax/).
   Certificates for domains that match this pattern will be posted to Slack.
