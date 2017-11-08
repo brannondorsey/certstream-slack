@@ -22,106 +22,112 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dustin/go-humanize/english"
-
+	"github.com/CaliDog/certstream-go"
 	slack "github.com/ashwanthkumar/slack-go-webhook"
-	"github.com/gorilla/websocket"
+	"github.com/dustin/go-humanize/english"
 	"github.com/jmoiron/jsonq"
 	"github.com/sirupsen/logrus"
 )
-
-var log = logrus.New()
-var certStreamURL = "wss://certstream.calidog.io"
 
 func main() {
 	// get the Slack webhook URL
 	webhookURL := os.Getenv("SLACK_WEBHOOK_URL")
 	if webhookURL == "" {
-		log.Fatal("SLACK_WEBHOOK_URL must be set")
+		logrus.Info("SLACK_WEBHOOK_URL not set, skipping Slack posting")
 	}
 
 	// get and compile the domain pattern regex
 	domainPattern := os.Getenv("DOMAIN_PATTERN")
 	if domainPattern == "" {
-		log.Fatal("DOMAIN_PATTERN must be set")
+		logrus.Fatal("DOMAIN_PATTERN must be set")
 	}
 	domainRegex, err := regexp.Compile(domainPattern)
 	if err != nil {
-		log.WithError(err).Fatal("invalid DOMAIN_PATTERN")
+		logrus.WithError(err).Fatal("invalid DOMAIN_PATTERN")
 	}
 
-	// connect to certstream via secure websocket
-	conn, _, err := websocket.DefaultDialer.Dial(certStreamURL, nil)
-	if err != nil {
-		log.WithError(err).Fatal("could not connect to certstream")
-	}
-	defer conn.Close()
-
-	// loop over each message sent in the websocket
-	log.WithField("domainPattern", domainRegex.String()).Info("watching for certificates")
+	logrus.WithField("domainPattern", domainRegex.String()).Info("watching for certificates")
+	results, errors := certstream.CertStreamEventStream(true)
 	for {
-		// read a JSON message from the websocket and parse it using jsonq
-		var msg interface{}
-		err = conn.ReadJSON(&msg)
-		if err != nil {
-			log.WithError(err).Fatalf("error decoding JSON")
-		}
-		jq := jsonq.NewQuery(msg)
-
-		// skip everything that's not a "certificate_update" (e.g., heartbeats)
-		if t, _ := jq.String("message_type"); t != "certificate_update" {
-			continue
-		}
-
-		// pull the list of all the domains named in the leaf certificate (CN and SANs)
-		domains, err := jq.ArrayOfStrings("data", "leaf_cert", "all_domains")
-		if err != nil {
-			log.WithError(err).Error("couldn't get domains")
-			continue
-		}
-
-		// collect a list of matching domains
-		matches := []string{}
-		for _, domain := range domains {
-			if !domainRegex.MatchString(domain) {
-				continue
+		select {
+		case err := <-errors:
+			logrus.WithError(err).Error("error streaming events")
+		case jq := <-results:
+			// we're only interested in "certificate_update" events
+			if t, _ := jq.String("message_type"); t == "certificate_update" {
+				handleCertificateUpdate(domainRegex, webhookURL, jq)
 			}
-			// wrap each domain in backticks for a prettier Slack message
-			matches = append(matches, "`"+domain+"`")
-		}
-
-		// if none of the domains match our regex, we're done
-		if len(matches) == 0 {
-			continue
-		}
-
-		// report the matches in sorted order
-		sort.Strings(matches)
-
-		// generate a message like " and X others" if there are extra domains in
-		// the cert that didn't match
-		additionalDomains := len(domains) - len(matches)
-		if additionalDomains > 0 {
-			matches = append(matches, fmt.Sprintf("%d others", additionalDomains))
-		}
-
-		// pull the certificate fingerprint and use it to get the crt.sh URL
-		fingerprint, err := jq.String("data", "leaf_cert", "fingerprint")
-		if err != nil {
-			log.WithError(err).Error("could not parse fingerprint from matching certificate")
-		}
-		certURL := fmt.Sprintf("https://crt.sh/?q=%s", strings.Replace(fingerprint, ":", "", -1))
-
-		// post the Slack message
-		payload := slack.Payload{
-			Text: fmt.Sprintf(
-				"Found matching certificate for %s: %s",
-				english.OxfordWordSeries(matches, "and"),
-				certURL,
-			),
-		}
-		for _, err := range slack.Send(webhookURL, "", payload) {
-			log.WithError(err).WithField("fingerprint", fingerprint).Error("error sending webhook")
 		}
 	}
+}
+
+func handleCertificateUpdate(domainRegex *regexp.Regexp, webhookURL string, jq jsonq.JsonQuery) {
+	// pull the list of all the domains named in the leaf certificate (CN and SANs)
+	domains, err := jq.ArrayOfStrings("data", "leaf_cert", "all_domains")
+	if err != nil {
+		logrus.WithError(err).Error("couldn't get domains")
+		return
+	}
+
+	// if none of the domains match our regex, we're done
+	if !anyMatch(domainRegex, domains) {
+		return
+	}
+
+	// pull the certificate fingerprint and use it to get the crt.sh URL
+	fingerprint, err := jq.String("data", "leaf_cert", "fingerprint")
+	if err != nil {
+		logrus.WithError(err).Error("could not parse fingerprint from matching certificate")
+		return
+	}
+	certURL := fmt.Sprintf("https://crt.sh/?q=%s", strings.Replace(fingerprint, ":", "", -1))
+
+	// post the Slack message
+	payload := slack.Payload{
+		Text: fmt.Sprintf(
+			"Found matching certificate for %s: %s",
+			formatDomainMessage(domainRegex, domains),
+			certURL,
+		),
+	}
+
+	logrus.Info(payload.Text)
+
+	if webhookURL != "" {
+		for _, err := range slack.Send(webhookURL, "", payload) {
+			logrus.WithError(err).Error("error sending webhook")
+		}
+	}
+}
+
+func anyMatch(regex *regexp.Regexp, values []string) bool {
+	for _, value := range values {
+		if regex.MatchString(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatDomainMessage(domainRegex *regexp.Regexp, domains []string) string {
+	matches := []string{}
+	for _, domain := range domains {
+		if !domainRegex.MatchString(domain) {
+			continue
+		}
+		// wrap each domain in backticks for a prettier Slack message
+		matches = append(matches, "`"+domain+"`")
+	}
+	// report the matches in sorted order
+	sort.Strings(matches)
+
+	// generate a message like " and X others" if there are extra domains in
+	// the cert that didn't match
+	additionalDomains := len(domains) - len(matches)
+	if additionalDomains > 0 {
+		matches = append(matches, fmt.Sprintf("%d others", additionalDomains))
+	}
+
+	// join them together with an Oxford comma as required (!)
+	return english.OxfordWordSeries(matches, "and")
 }

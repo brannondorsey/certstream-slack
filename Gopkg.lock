@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  branch = "master"
+  name = "github.com/CaliDog/certstream-go"
+  packages = ["."]
+  revision = "79eec0664246f1668ae85469616757084415b4cb"
+
+[[projects]]
   name = "github.com/ashwanthkumar/slack-go-webhook"
   packages = ["."]
   revision = "58b9a44feb242f0ced1a85304b1b6af57b770234"
@@ -76,6 +82,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "b16138687b6856f543d489897638f833b1597da433bed2177bab0507399a147f"
+  inputs-digest = "7a8724032339c473faee60383c1db1f48cb0ee521207146c1b2e9fd0a1451e8c"
   solver-name = "gps-cdcl"
   solver-version = 1
