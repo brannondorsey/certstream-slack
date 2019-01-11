@@ -69,6 +69,10 @@ func handleCertificateUpdate(domainRegex *regexp.Regexp, webhookURL string, jq j
 		return
 	}
 
+	domains = filter(domains, func(v string) bool {
+		return !strings.Contains(v, "members.linode.com")
+	})
+
 	// if none of the domains match our regex, we're done
 	if !anyMatch(domainRegex, domains) {
 		return
@@ -130,4 +134,16 @@ func formatDomainMessage(domainRegex *regexp.Regexp, domains []string) string {
 
 	// join them together with an Oxford comma as required (!)
 	return english.OxfordWordSeries(matches, "and")
+}
+
+// Returns a new slice containing all strings in the
+// slice that satisfy the predicate `f`.
+func filter(vs []string, f func(string) bool) []string {
+	vsf := make([]string, 0)
+	for _, v := range vs {
+		if f(v) && len(v) > 7 {
+			vsf = append(vsf, v)
+		}
+	}
+	return vsf
 }
