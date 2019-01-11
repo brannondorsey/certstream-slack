@@ -85,7 +85,7 @@ func handleCertificateUpdate(domainRegex *regexp.Regexp, webhookURL string, jq j
 	// post the Slack message
 	payload := slack.Payload{
 		Text: fmt.Sprintf(
-			"Found matching certificate for %s: %s",
+			"A new certificate was created for %s: %s",
 			formatDomainMessage(domainRegex, domains),
 			certURL,
 		),
